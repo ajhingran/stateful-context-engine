@@ -5055,7 +5055,6 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "encoding_rs",
- "futures-channel",
  "futures-core",
  "futures-util",
  "h2",
@@ -5679,8 +5678,6 @@ dependencies = [
  "arrow-array",
  "fastembed",
  "lancedb",
- "reqwest",
- "serde_json",
 ]
 
 [[package]]

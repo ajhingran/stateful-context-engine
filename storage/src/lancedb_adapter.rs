@@ -1,12 +1,12 @@
-use std::borrow::Cow;
-use std::fmt::Debug;
-use std::sync::Arc;
 use arrow_array::{ArrayRef, FixedSizeListArray, Float32Array, StringArray};
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use lancedb;
 use lancedb::arrow::arrow_schema::{DataType, Field, Schema, SchemaRef, TimeUnit};
 use lancedb::embeddings::{EmbeddingDefinition, EmbeddingFunction};
 use lancedb::{Connection, Table, error};
+use std::borrow::Cow;
+use std::fmt::Debug;
+use std::sync::Arc;
 
 const EMBEDDING_TABLE_NAME: &str = "context_embeddings";
 const EMBEDDING_DIM: i32 = 1024;
@@ -30,9 +30,13 @@ impl Embedder {
     /// Loads the BGE-Large-EN-v1.5 model locally via fastembed.
     /// Downloads the model on first use if not already cached.
     fn new() -> Result<Self, error::Error> {
-        let model: TextEmbedding = TextEmbedding::try_new(
-            InitOptions::new(EmbeddingModel::BGELargeENV15)
-        ).map_err(|e| error::Error::Other { message: e.to_string(), source: None })?;
+        let model: TextEmbedding = TextEmbedding::try_new(InitOptions::new(
+            EmbeddingModel::BGELargeENV15,
+        ))
+        .map_err(|e| error::Error::Other {
+            message: e.to_string(),
+            source: None,
+        })?;
         Ok(Self { model })
     }
 
@@ -41,16 +45,17 @@ impl Embedder {
     /// Flattens `Vec<Vec<f32>>` into a contiguous buffer, then wraps it as a fixed-size list
     /// where each list has [`EMBEDDING_DIM`] elements.
     fn convert_to_arrow(embeddings: Vec<Vec<f32>>) -> EmbeddingResult {
-        let floats: Arc<Float32Array> = Arc::new(
-            Float32Array::from_iter_values(embeddings.into_iter().flatten())
-        );
-        let field: Arc<Field> = Arc::new(
-            Field::new("item", DataType::Float32, false)
-        );
+        let floats: Arc<Float32Array> = Arc::new(Float32Array::from_iter_values(
+            embeddings.into_iter().flatten(),
+        ));
+        let field: Arc<Field> = Arc::new(Field::new("item", DataType::Float32, false));
 
         FixedSizeListArray::try_new(field, EMBEDDING_DIM, floats, None)
             .map(|a| Arc::new(a) as ArrayRef)
-            .map_err(|e| error::Error::Other { message: e.to_string(), source: None })
+            .map_err(|e| error::Error::Other {
+                message: e.to_string(),
+                source: None,
+            })
     }
 }
 
@@ -72,7 +77,11 @@ impl EmbeddingFunction for Embedder {
 
     /// Output type — a fixed-size list of [`EMBEDDING_DIM`] float32 values per row.
     fn dest_type(&self) -> DataTypeResult<'_> {
-        Ok(Cow::Owned(DataType::new_fixed_size_list(DataType::Float32, EMBEDDING_DIM, false)))
+        Ok(Cow::Owned(DataType::new_fixed_size_list(
+            DataType::Float32,
+            EMBEDDING_DIM,
+            false,
+        )))
     }
 
     /// Embeds a batch of text values from the `context_text` column at insert time.
@@ -82,14 +91,23 @@ impl EmbeddingFunction for Embedder {
         match source.data_type() {
             DataType::Utf8 => {
                 let string_array = source.as_any().downcast_ref::<StringArray>().unwrap();
-                let inputs: Vec<&str> = string_array.iter()
-                    .map(|t| t.ok_or_else(|| error::Error::Other {
-                        message: "null text value".to_string(), source: None
-                    }))
+                let inputs: Vec<&str> = string_array
+                    .iter()
+                    .map(|t| {
+                        t.ok_or_else(|| error::Error::Other {
+                            message: "null text value".to_string(),
+                            source: None,
+                        })
+                    })
                     .collect::<lancedb::Result<Vec<&str>>>()?;
 
-                let embeddings: Vec<Vec<f32>> = self.model.embed(inputs, None)
-                    .map_err(|e| error::Error::Other { message: e.to_string(), source: None })?;
+                let embeddings: Vec<Vec<f32>> =
+                    self.model
+                        .embed(inputs, None)
+                        .map_err(|e| error::Error::Other {
+                            message: e.to_string(),
+                            source: None,
+                        })?;
 
                 Embedder::convert_to_arrow(embeddings)
             }
@@ -137,17 +155,26 @@ impl LanceDBAdapter {
             embedding_table_schema: Schema::new(vec![
                 Field::new("id", DataType::Utf8, false),
                 Field::new("context_text", DataType::Utf8, false),
-                Field::new("tokens", DataType::List(
-                    Arc::new(Field::new("item", DataType::Int32, false))
-                ), false),
-                Field::new("vector", DataType::FixedSizeList(
-                    Arc::new(Field::new("item", DataType::Float32, false)),
-                    EMBEDDING_DIM,
-                ), false),
-                Field::new("timestamp", DataType::Timestamp(
-                    TimeUnit::Millisecond, Some(Arc::from("UTC"))
-                ), false),
-            ]).into(),
+                Field::new(
+                    "tokens",
+                    DataType::List(Arc::new(Field::new("item", DataType::Int32, false))),
+                    false,
+                ),
+                Field::new(
+                    "vector",
+                    DataType::FixedSizeList(
+                        Arc::new(Field::new("item", DataType::Float32, false)),
+                        EMBEDDING_DIM,
+                    ),
+                    false,
+                ),
+                Field::new(
+                    "timestamp",
+                    DataType::Timestamp(TimeUnit::Millisecond, Some(Arc::from("UTC"))),
+                    false,
+                ),
+            ])
+            .into(),
         })
     }
 
@@ -156,15 +183,23 @@ impl LanceDBAdapter {
     /// The table is configured with an embedding definition that automatically
     /// populates the `vector` column from `context_text` on insert.
     pub async fn create_embeddings_table_if_not_exists(&self) -> Result<Table, error::Error> {
-        match self.connection
+        match self
+            .connection
             .create_empty_table(EMBEDDING_TABLE_NAME, self.embedding_table_schema.clone())
-            .add_embedding(EmbeddingDefinition::new("context_text", EMBEDDER_NAME, Some("vector")))?
+            .add_embedding(EmbeddingDefinition::new(
+                "context_text",
+                EMBEDDER_NAME,
+                Some("vector"),
+            ))?
             .execute()
             .await
         {
             Ok(table) => Ok(table),
             Err(error::Error::TableAlreadyExists { .. }) => {
-                self.connection.open_table(EMBEDDING_TABLE_NAME).execute().await
+                self.connection
+                    .open_table(EMBEDDING_TABLE_NAME)
+                    .execute()
+                    .await
             }
             Err(e) => Err(e),
         }
